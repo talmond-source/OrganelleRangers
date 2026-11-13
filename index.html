@@ -4620,6 +4620,81 @@ function attachHelmet(rig, geo, mat, L) {
   const m = new THREE.Mesh(geo, mat); m.name = "helmet"; m.castShadow = true; rig.b.Head.add(m); return m;
 }
 
+/* ================= Sculpted ranger models (Meshy, rigged to a Mixamo skeleton) =================
+   Each ranger with a sculpted model ships as models/<id>.rmdl: a skinned mesh, its skeleton in bind
+   pose, PBR textures (color, normal, roughness/metal) and per-bone retarget quaternions so the game's
+   existing mocap clips drive it:  L_target = inv(D_parent) * L_source * D_self.
+   Rangers without a sculpted model fall back to the projected-sheet body. */
+const RMODEL = (() => {
+  const VER = 1; // bump when a model file changes so cached copies refresh
+  const LIST = ["atp", "ribosome", "rougher", "golgi"]; // rangers that have a sculpted model on disk
+  async function fetchModel(id) {
+    const r = await fetch("models/" + id + ".rmdl?v=" + VER); if (!r.ok) throw new Error(id + " " + r.status);
+    const buf = await r.arrayBuffer(); const dv = new DataView(buf);
+    if (String.fromCharCode(dv.getUint8(0), dv.getUint8(1), dv.getUint8(2), dv.getUint8(3)) !== "RMDL") throw new Error("bad model " + id);
+    const hl = dv.getUint32(4, true); const H = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 8, hl))); const base = 8 + hl;
+    const view = (k, T, n) => { const [o, len] = H.views[k]; return new T(buf, base + o, n ?? len / T.BYTES_PER_ELEMENT); };
+    const N = H.count, q = view("pos", Uint16Array, N * 3), P = new Float32Array(N * 3);
+    for (let i = 0; i < N * 3; i++) { const a = i % 3; P[i] = H.lo[a] + (q[i] / 65535) * (H.hi[a] - H.lo[a]); }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(P, 3));
+    geo.setAttribute("normal", new THREE.BufferAttribute(view("nrm", Int8Array, N * 3), 3, true));
+    geo.setAttribute("uv", new THREE.BufferAttribute(view("uv", Uint16Array, N * 2), 2, true));
+    geo.setAttribute("skinIndex", new THREE.BufferAttribute(view("jnt", Uint8Array, N * 4), 4));
+    geo.setAttribute("skinWeight", new THREE.BufferAttribute(view("wt", Uint8Array, N * 4), 4, true));
+    geo.setIndex(new THREE.BufferAttribute(H.i32 ? view("idx", Uint32Array, H.icount) : view("idx", Uint16Array, H.icount), 1));
+    geo.computeBoundingSphere();
+    const tex = async (k, srgb) => {
+      if (!H.views["tex_" + k]) return null; const [o, len] = H.views["tex_" + k];
+      const blob = new Blob([new Uint8Array(buf, base + o, len)], { type: "image/jpeg" });
+      const img = await new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = URL.createObjectURL(blob); });
+      const t = new THREE.Texture(img); t.flipY = false; t.encoding = srgb ? THREE.sRGBEncoding : THREE.LinearEncoding;
+      t.anisotropy = LITE ? 2 : 8; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.needsUpdate = true; return t;
+    };
+    const [map, normal, mr] = await Promise.all([tex("map", true), tex("normal", false), tex("mr", false)]);
+    return { H, geo, map, normal, mr };
+  }
+  async function loadAll(into) {
+    await Promise.all(LIST.map(async (id) => {
+      if (!into[id]) return;
+      try { into[id].sculpt = await fetchModel(id); } catch (e) { console.warn("sculpted model unavailable:", id, e.message); }
+    }));
+  }
+  function material(S) {
+    const m = LITE ? new THREE.MeshPhongMaterial({ map: S.map, normalMap: S.normal, shininess: 60, specular: new THREE.Color(0x404040) })
+      : new THREE.MeshStandardMaterial({ map: S.map, normalMap: S.normal, roughnessMap: S.mr, metalnessMap: S.mr, metalness: 1, roughness: 1, envMapIntensity: 1.15 });
+    if (S.normal) m.normalScale.set(1, -1); // glTF tangent space (flipY = false)
+    const flash = { value: 0 }; m.userData.flash = flash;
+    m.onBeforeCompile = (sh) => {
+      sh.uniforms.flash = flash;
+      sh.fragmentShader = "uniform float flash;\n" + sh.fragmentShader.replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\n totalEmissiveRadiance += vec3(1.0, 0.96, 0.9) * flash * 0.3;");
+    };
+    return m;
+  }
+  /* build a model object shaped like R3D.build's, so the fight code can't tell the difference */
+  function build(id, S, clipBones) {
+    const H = S.H, n = H.bones.length, root = new THREE.Group(), body = new THREE.Group(); root.add(body);
+    const bones = [], W = [];
+    for (let i = 0; i < n; i++) { const b = new THREE.Bone(); b.name = H.bones[i]; bones.push(b); W.push({ p: new THREE.Vector3().fromArray(H.bpos, i * 3), q: new THREE.Quaternion().fromArray(H.bquat, i * 4).normalize() }); }
+    for (let i = 0; i < n; i++) {
+      const pi = H.parents[i], b = bones[i];
+      if (pi < 0) { b.position.copy(W[i].p); b.quaternion.copy(W[i].q); body.add(b); }
+      else { const pq = W[pi].q.clone().invert(); b.position.copy(W[i].p).sub(W[pi].p).applyQuaternion(pq); b.quaternion.copy(pq.multiply(W[i].q)); bones[pi].add(b); }
+    }
+    const b = {}; bones.forEach((x) => (b[x.name] = x));
+    root.updateMatrixWorld(true);
+    const mat = material(S);
+    const suit = new THREE.SkinnedMesh(S.geo, mat); suit.name = "suit"; suit.frustumCulled = false; suit.castShadow = true; suit.receiveShadow = true;
+    body.add(suit); root.updateMatrixWorld(true); suit.bind(new THREE.Skeleton(bones));
+    // retarget tables, indexed like the clip bones
+    const D = clipBones.map((nm, j) => new THREE.Quaternion().fromArray(H.D, H.clipBones.indexOf(nm) * 4));
+    const Dp = clipBones.map((nm) => { const bn = b[nm]; const p = bn && bn.parent && bn.parent.isBone ? clipBones.indexOf(bn.parent.name) : -1; return p >= 0 ? D[p].clone().invert() : new THREE.Quaternion(); });
+    const hipOff = new THREE.Vector3().fromArray(H.hipOff);
+    return { root, body, b, suit, helmet: null, mat, skeleton: suit.skeleton, extras: {}, L: null, sculpted: true, retarget: { D, Dp, hipOff } };
+  }
+  return { LIST, loadAll, build };
+})();
+
 /* ================= Ranger models + motion-capture animation =================
    One shared athletic body (smoothed from a Mixamo base), a per-ranger helmet carved from the
    sheet close-ups, and the ranger's sheet art projected over both. Motion comes from retargeted
@@ -4676,6 +4751,8 @@ const R3D = (() => {
       }
       sample(req.clip, req.frame, this.Q, this.P, req);
       if (req.upper) { sample(req.upper.clip, req.upper.frame, this.Qb, this.Pb, req.upper); CL.bones.forEach((n, j) => { if (UPPER.has(n)) this.Q[j].copy(this.Qb[j]); }); }
+      const RT = this.m.retarget; // sculpted models: map the mocap skeleton's rotations onto this skeleton
+      if (RT) { for (let j = 0; j < NB; j++) this.Q[j].premultiply(RT.Dp[j]).multiply(RT.D[j]); this.P.add(RT.hipOff); }
       if (this.fade > 0) { this.fade = Math.max(0, this.fade - dt / Math.max(1e-3, this.fadeT)); const w = this.fade * this.fade * (3 - 2 * this.fade); this.Q.forEach((q, j) => q.slerp(this.from[j], w)); this.P.lerp(this.fromP, w); }
       this.map.forEach((b, j) => b && b.quaternion.copy(this.Q[j]));
       this.m.b.Hips.position.copy(this.P);
@@ -4693,6 +4770,7 @@ const R3D = (() => {
   }
   /* ------- build a ranger ------- */
   function build(id, R) { // R = per-ranger asset bundle {L, col, mat, helmet:{meta,buf}}
+    if (R.sculpt) return withShadow(RMODEL.build(id, R.sculpt, CL.bones));
     const root = new THREE.Group(), body = new THREE.Group(); root.add(body);
     const bones = makeSkeleton(); body.add(bones[0]);
     const b = {}; bones.forEach((x) => (b[x.name] = x));
@@ -4710,9 +4788,11 @@ const R3D = (() => {
     bones.forEach((x, i) => x.quaternion.copy(rest[i])); root.updateMatrixWorld(true);
     const helmet = attachHelmet(rig, decodeHelmet(R.helmet.buf, R.helmet.meta), mat, R.L);
     makeFists(b, 1);
-    const model = { root, body, b, suit, helmet, mat, skeleton, extras: {}, L: R.L };
+    return withShadow({ root, body, b, suit, helmet, mat, skeleton, extras: {}, L: R.L });
+  }
+  function withShadow(model) {
     // soft contact shadow (always on; real shadow maps add to it on capable machines)
-    const sh = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.5), new THREE.MeshBasicMaterial({ map: R3D_SHADOW(), transparent: true, depthWrite: false, opacity: 0.75 })); sh.rotation.x = -Math.PI / 2; sh.position.y = 0.012; sh.renderOrder = 1; root.add(sh); model.shadow = sh;
+    const sh = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.5), new THREE.MeshBasicMaterial({ map: R3D_SHADOW(), transparent: true, depthWrite: false, opacity: 0.75 })); sh.rotation.x = -Math.PI / 2; sh.position.y = 0.012; sh.renderOrder = 1; model.root.add(sh); model.shadow = sh;
     model.anim = new Animator(model);
     return model;
   }
@@ -4825,6 +4905,7 @@ ASSETS.ready = (async () => {
   for (const [id, r] of Object.entries(D.rangers)) {
     ASSETS.rangers[id] = { L: r.L, col: await loadTex(r.col, true), mat: await loadTex(r.mat, false), helmet: { meta: r.helmet.meta, buf: b64buf(r.helmet.b64) }, mask: r.fg ? await loadMask(r.fg) : null };
   }
+  await RMODEL.loadAll(ASSETS.rangers);
   return true;
 })();
 
@@ -5218,7 +5299,7 @@ const STANCE_YAW = 0.38; // turn the chest a little toward the camera, Injustice
 class Fighter {
   constructor(game, id, slot, ctrl) {
     this.game = game; this.id = id; this.slot = slot; this.ctrl = ctrl; this.info = BYID[id];
-    this.model = R3D.build(id, ASSETS.rangers[id]); this.rig = this.model.root; game.view.scene.add(this.rig); if (EXTRAS[id]) EXTRAS[id](this.model);
+    this.model = R3D.build(id, ASSETS.rangers[id]); this.rig = this.model.root; game.view.scene.add(this.rig); if (EXTRAS[id] && !this.model.sculpted) EXTRAS[id](this.model);
     this.kit = KITS[id]; this.reset(slot === 0 ? -2.6 : 2.6);
     this.meter = 0; this.bars = 2; this.hp = BAR_HP; this.dispHp = BAR_HP; this.ghostHp = BAR_HP;
   }
@@ -5695,7 +5776,7 @@ const kit = (o) => Object.assign({ ultRange: 3.4, ult: megaMove(), special(dir, 
 const teleport = (me, x, col) => { const g = me.game; g.parts.boom(V3(me.x, 0.9, 0), col, 0.5); me.x = clamp(x, -HALF + 0.3, HALF - 0.3); me.face = me.opp.x >= me.x ? 1 : -1; g.parts.boom(V3(me.x, 0.9, 0), col, 0.5); g.sfx("whoosh"); me.inv = 10; };
 const behind = (me) => me.opp.x + (me.opp.x >= me.x ? 1 : -1) * 1.0;
 const total = (f) => f.hp + (f.bars - 1) * BAR_HP;
-function ensureClone(me) { if (!me._clone) { me._clone = R3D.build(me.id, ASSETS.rangers[me.id]); if (EXTRAS[me.id]) EXTRAS[me.id](me._clone); me._clone.shadow.visible = false; me._clone.root.visible = false; me.game.view.scene.add(me._clone.root); } return me._clone; }
+function ensureClone(me) { if (!me._clone) { me._clone = R3D.build(me.id, ASSETS.rangers[me.id]); if (EXTRAS[me.id] && !me._clone.sculpted) EXTRAS[me.id](me._clone); me._clone.shadow.visible = false; me._clone.root.visible = false; me.game.view.scene.add(me._clone.root); } return me._clone; }
 function cloneRush(me, col, x0) {
   const g = me.game, c = ensureClone(me); c.root.visible = true; c.body.rotation.y = me.face > 0 ? Math.PI / 2 : -Math.PI / 2; const sx = x0 ?? me.x + me.face * 0.4; g.parts.boom(V3(sx, 0.9, 0), col, 0.5); g.parts.fan(V3(sx, 1.1, 0.2), col, me.face, 10, 12, 0.6);
   g.spawn({ owner: me.slot, keep: true, x: sx, y: 1.1, dy: -1.1, z: 0, vx: me.face * 7.5, mesh: c.root, spin: 0, life: 70, mv: { dmg: 11, level: "mid", hs: 22, bs: 14, push: 3, special: true, sfx: "heavy", knock: [4, 6] },
@@ -6252,7 +6333,7 @@ function makePortraits(view) {
 /* ---------- showcase scene for menus / select ---------- */
 const SHOW = {
   init(view) { this.view = view; this.stage = STAGES.euk.build(view); view.scene.add(this.stage.root); this.rigs = {}; this.parts = new Particles(view.scene); this.picks = ["atp", "ribosome"]; this.t = 0; },
-  rig(id) { if (!this.rigs[id] && ASSETS.rangers[id]) { this.rigs[id] = R3D.build(id, ASSETS.rangers[id]); if (EXTRAS[id]) EXTRAS[id](this.rigs[id]); this.view.scene.add(this.rigs[id].root); } return this.rigs[id]; },
+  rig(id) { if (!this.rigs[id] && ASSETS.rangers[id]) { this.rigs[id] = R3D.build(id, ASSETS.rangers[id]); if (EXTRAS[id] && !this.rigs[id].sculpted) EXTRAS[id](this.rigs[id]); this.view.scene.add(this.rigs[id].root); } return this.rigs[id]; },
   setVisible(on) { this.stage.root.visible = on; Object.values(this.rigs).forEach((r) => (r.root.visible = false)); this.on = on; if (on) this.stage.apply && this.stage.apply(this.view); },
   update(dt, mode) {
     if (!this.on) return; this.t += dt; const t = this.t; this.stage.update(t, dt); this.parts.update(dt);
