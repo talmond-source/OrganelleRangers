@@ -5404,7 +5404,7 @@ class Game {
     }
   }
   comboShow(att, n) { if (n >= 2) HUD.combo(att.slot, n); }
-  spawn(p) { this.proj.push(p); this.view.scene.add(p.mesh); return p; }
+  spawn(p) { p.t = 0; p.dead = false; this.proj.push(p); this.view.scene.add(p.mesh); return p; }
   zone(z) { z.op = z.op || 0.6; z.mesh = new THREE.Mesh(new THREE.CircleGeometry(1, 40), new THREE.MeshBasicMaterial({ color: z.color, transparent: true, opacity: z.op, depthWrite: false })); z.mesh.rotation.x = -Math.PI / 2; z.mesh.scale.set(z.w, 0.55, 1); z.mesh.position.set(z.x, 0.02, 0); this.view.scene.add(z.mesh); this.zones.push(z); return z; }
   ko(def) {
     this.koPending = def; if (this.phase === "cine") return;
@@ -5764,7 +5764,7 @@ KITS.smoother = kit({ moves: {
 } });
 /* ---------------- MAROON \u00b7 LYSOSOME ---------------- */
 KITS.lysosome = kit({ moves: {
-  "": mkShot("Enzyme Grenade", { clip: "throw", at: 13, speed: 6.5, y: 1.6, make: () => vesicle("#9bd13a", 0.19), mv: { dmg: 9, level: "unblockable", hs: 22, onHit(att, def) { HUD.pop(def, "GUARD BROKEN", att.info.hex); } }, proj: () => ({ vy: 5.5, grav: 12, onGround: (p) => {} }) }),
+  "": mkShot("Enzyme Grenade", { clip: "throw", at: 13, speed: 6.5, y: 1.6, make: () => vesicle("#9bd13a", 0.19), mv: { dmg: 9, level: "unblockable", hs: 22, onHit(att, def) { HUD.pop(def, "GUARD BROKEN", att.info.hex); } }, proj: (me) => { const T = 0.82, d = Math.abs(me.opp.x - me.x) - 0.7; return { vx: me.face * clamp(d / T, 2.5, 10), vy: 4, grav: 14, onGround: (p) => { const g = me.game, o = me.opp; g.parts.boom(V3(p.x, 0.1, 0), "#9bd13a", 0.8); g.parts.ring(V3(p.x, 0.15, 0.2), "#9bd13a", 0.4, 12); g.sfx("boom"); if (o.grounded && Math.abs(o.x - p.x) < 1.2 && o.hurt()) g.resolve(me, o, p.mv, V3(o.x, 0.6, 0.3), p); } }; } }),
   fwd: mkSelf("Autophagy", { at: 12, end: 30, fn: (me, opp, g) => { if (me.meter < 20) { HUD.toast(me.slot, "Needs meter"); return; } me.meter -= 20; me.hp = Math.min(BAR_HP, me.hp + 14); g.parts.boom(V3(me.x, 1, 0), "#9bd13a", 0.6); HUD.pop(me, "+14 RECYCLED", "#9bd13a"); g.sfx("ding"); } }),
   down: mkSelf("Acid Pool", { at: 10, end: 28, fn: (me, opp, g) => { g.zone({ x: clamp(me.x + me.face * 2.2, -HALF, HALF), w: 1.5, life: 360, color: "#9bd13a", op: 0.55, tick: (gm, z) => { if (z.life % 30 === 0 && opp.grounded && Math.abs(opp.x - z.x) < 1.4) { gm.damage(opp, 2, me, true); gm.parts.spark(V3(opp.x, 0.3, 0.3), "#c8f060", 0.4); opp.flash = 0.04; HUD.pop(opp, "pH 4.5", "#9bd13a"); } } }); } }),
 } });
