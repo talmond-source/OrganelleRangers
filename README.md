@@ -6,6 +6,7 @@ An arcade-style fighting game where the fighters are cell organelles and molecul
 
 - **Play:** https://talmond-source.github.io/OrganelleRangers/
 - **Controls:** arrow keys move, Z punches, X kicks, Z+X together is a special (alone or with a direction), SPACE is the Megaform once the meter is full. Hold away from the opponent to block.
+- **Phones and tablets:** open the link, then use "Add to Home Screen" to install it like an app. It plays with an on-screen D-pad and A / B / SP / MEGA buttons; the move list is in the pause menu.
 - **Modes:** Single Player (Easy, Medium, Hard) and Training.
 - **Lighter graphics:** Chromebooks get a lighter 3D mode automatically. Add `?lite` or `?hq` to the link to force one or the other.
 
