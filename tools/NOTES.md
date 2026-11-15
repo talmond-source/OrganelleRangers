@@ -6,9 +6,8 @@ Mocap itself is fine (idle = hunched guard: chest leans ~33 deg, head ~19 deg do
 Fix in progress: fixneck.py (moves Neck/Head joints to the mesh's narrowest neck slice, returns neck/head weight below
 the neck to Spine2, moves upper-arm weight above the shoulder joint to shoulder/Spine2). Works on the repo's models/*.rmdl.
 Test: serve a copy of the site, run t4.js (Playwright, close-up poses) and compare.
-Live site currently has commit 30ceeb6 (movie + v3 models). Not yet pushed: neck fix.
 Movie: same rigs are baked into the rendered frames; fixing the movie means re-rendering (rig fix must be ported to
 rangers/*.glb + rig.json, i.e. P of Neck/Head and the weights).
-- models_v4/ = all 15 with fixneck.py applied (neck+chest fix), tested OK on ribosome+mito, full-roster check running; not yet pushed.
-- 2026-11-15: pushed 8798517 — pause button (PAUSE under timer, P/Enter/Esc), fight camera keeps both fighters in frame (training dummy no longer leaves screen).
+- All 15 models in models/ have the neck + chest repair (fixneck.py) applied and were checked close up in stance, punch and kick.
+- 2026-11-15: pause button (PAUSE under timer; P / Enter / Esc) and a fight camera that keeps both fighters in frame are in the current build.
 - Open: Phage stray strands (arm→chest) on punches; movie still has old rigs baked in (needs a re-render after rig fixes are ported to the Blender rangers).
