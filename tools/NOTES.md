@@ -10,3 +10,5 @@ Live site currently has commit 30ceeb6 (movie + v3 models). Not yet pushed: neck
 Movie: same rigs are baked into the rendered frames; fixing the movie means re-rendering (rig fix must be ported to
 rangers/*.glb + rig.json, i.e. P of Neck/Head and the weights).
 - models_v4/ = all 15 with fixneck.py applied (neck+chest fix), tested OK on ribosome+mito, full-roster check running; not yet pushed.
+- 2026-11-15: pushed 8798517 — pause button (PAUSE under timer, P/Enter/Esc), fight camera keeps both fighters in frame (training dummy no longer leaves screen).
+- Open: Phage stray strands (arm→chest) on punches; movie still has old rigs baked in (needs a re-render after rig fixes are ported to the Blender rangers).
