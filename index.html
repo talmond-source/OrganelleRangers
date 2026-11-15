@@ -82,6 +82,9 @@ kbd{font-family:var(--px);font-size:7px;min-width:16px;height:16px;padding:0 4px
 .name{font-family:var(--bn);font-size:2.1cqw;letter-spacing:.06em;color:#fff;text-shadow:.15cqw .15cqw 0 #000,0 0 .8cqw var(--c);margin-bottom:.3cqw;display:flex;gap:.8cqw;align-items:center}
 .pbar.r .name{justify-content:flex-end}
 .pips{display:inline-flex;gap:.4cqw} .pips b{width:1cqw;height:1cqw;transform:rotate(45deg);background:var(--gold);border:.15cqw solid #000;display:inline-block} .pips b.off{background:#333}
+.tcol{display:flex;flex-direction:column;align-items:center}
+#pauseBtn{pointer-events:auto;display:block;margin:.3cqw auto 0;font-family:var(--px);font-size:.75cqw;letter-spacing:.12em;color:#fff;background:rgba(10,8,20,.7);border:.12cqw solid #ffffff66;border-radius:.3cqw;padding:.45cqw .8cqw;cursor:pointer;white-space:nowrap}
+#pauseBtn:hover{border-color:#ffd21f;color:#ffd21f} body.touch #pauseBtn{display:none}
 .timer{font-family:var(--px);font-size:3cqw;text-align:center;color:#fff;text-shadow:.25cqw .25cqw 0 #000;padding-top:.6cqw}
 .meters{position:absolute;bottom:2cqw;left:2.2cqw;right:2.2cqw;display:flex;justify-content:space-between}
 .meter{width:26cqw}
@@ -256,7 +259,7 @@ body.touch #selHint,body.touch .hintline{font-size:1.5cqw}
       <div id="hud" hidden>
         <div class="bars">
           <div class="pbar l" id="pb0"><div class="port" id="port0"></div><div class="info"><div class="name"><span id="nm0"></span><span class="pips" id="pips0"></span></div><div class="hp" id="hp0"><i class="gh"></i><i class="fill"></i></div></div></div>
-          <div class="timer" id="timer">99</div>
+          <div class="tcol"><div class="timer" id="timer">99</div><button id="pauseBtn" type="button">❚❚ PAUSE</button></div>
           <div class="pbar r" id="pb1"><div class="port" id="port1"></div><div class="info"><div class="name"><span class="pips" id="pips1"></span><span id="nm1"></span></div><div class="hp" id="hp1"><i class="gh"></i><i class="fill"></i></div></div></div>
         </div>
         <div class="combo l" id="combo0"></div><div class="combo r" id="combo1"></div>
@@ -5607,9 +5610,12 @@ class Game {
     if (this.phase === "cine" && this.cine) cam = this.cine.cam;
     else {
       const [a, b] = this.f; const mid = (a.x + b.x) / 2, sep = Math.abs(a.x - b.x);
-      this.camX = lerp(this.camX, clamp(mid, -HALF + 3.6, HALF - 3.6), 1 - Math.pow(0.002, dt));
-      const d = clamp(5.4 + sep * 0.62, 6.4, 10.8); this.camD = lerp(this.camD, d, 1 - Math.pow(0.01, dt));
-      const ay = Math.max(a.y, b.y) * 0.45;
+      // keep both fighters fully in frame: pull back for distance and for height (launches), and let the view reach the walls
+      const top = Math.max(a.y, b.y), ay = top * 0.45, HW = 0.443, HH = 0.249; // half-width / half-height of the view per metre of distance (fov 28, 16:9)
+      const d = clamp(Math.max(5.4 + sep * 0.62, (sep / 2 + 1.25) / HW, (top + 2.15 - 1.04 - ay) / HH), 6.4, 13);
+      this.camD = lerp(this.camD, d, 1 - Math.pow(0.0005, dt));
+      const lim = Math.max(0, HALF + 1.1 - this.camD * HW);
+      this.camX = lerp(this.camX, clamp(mid, -lim, lim), 1 - Math.pow(0.0005, dt));
       if (this.phase === "intro") { const t = this.pt; const who = t < 1.7 ? a : b; const close = t < 3.1; const k = close ? 1 : 0;
         cam = { p: V3(lerp(this.camX, who.x * 0.85, k), 1.5, lerp(this.camD, 4.4, k)), l: V3(lerp(this.camX, who.x, k), lerp(1.05, 1.25, k), 0), fov: 30 }; }
       else if (this.phase === "ko" || this.phase === "over") { const w = this.result ? this.f[this.result.winner] : null; const k = w ? smooth(clamp((this.pt - 2.2) / 1.2)) : 0;
@@ -6416,6 +6422,7 @@ const APP = {
     this.view.renderer.compile(this.view.scene, this.view.camera); this.applySettings(); $id("loading").hidden = true;
     $id("logoPips").innerHTML = ROSTER.map((r) => `<i style="--c:${r.hex}"></i>`).join("");
     initPad(); $id("screen").addEventListener("pointerdown", () => { if (this.mode === "intro") this.toPress(); });
+    $id("pauseBtn").addEventListener("click", (e) => { e.currentTarget.blur(); if (this.mode === "fight") this.pause(true); });
     $id("movesBack").addEventListener("click", () => { $id("movesOv").hidden = true; });
     if (TOUCH) { document.querySelector("#press .blinker").textContent = "TAP TO START"; $id("skipHint").textContent = "TAP TO SKIP"; }
     this.buildGrid(); this.bindMenus(); this.afterLoad();
@@ -6509,9 +6516,9 @@ const APP = {
     if (this.mode === "movie") return;
     if (this.mode === "intro") { if (!e.repeat) this.toPress(); e.preventDefault(); return; }
     if (this.mode === "press") { if (ok && !e.repeat) { AUDIO.sfx("confirm"); this.toTitle(); } e.preventDefault(); return; }
-    if (this.mode === "fight") { if (c === "Escape") this.pause(true); else if (this.game && this.game.phase === "intro" && (c === "Enter")) this.game.skipIntro = true; return; }
+    if (this.mode === "fight") { if (c === "Escape" || c === "KeyP" || (c === "Enter" && this.game && this.game.phase !== "intro")) { if (!e.repeat) this.pause(true); } else if (this.game && this.game.phase === "intro" && (c === "Enter")) this.game.skipIntro = true; return; }
     if (this.mode === "paused" && !$id("movesOv").hidden) { if (back || ok) $id("movesOv").hidden = true; return; }
-    if (this.mode === "paused" && back) return this.pause(false);
+    if (this.mode === "paused" && (back || c === "KeyP")) return this.pause(false);
     if (["title", "settings", "paused", "results", "diff"].includes(this.mode)) {
       if (up || dn) { this.menuSel(this.menuList, this.sel + (dn ? 1 : -1)); AUDIO.sfx("move"); e.preventDefault(); }
       else if (ok && !e.repeat) { const b = $id(this.menuList).querySelectorAll(".mbtn")[this.sel]; if (b) b.click(); e.preventDefault(); }
