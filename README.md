@@ -21,13 +21,14 @@ The playable game is `index.html` (one self-contained file built from `src/`), w
 
 ```
 cd src
-python3 build.py          # writes ../index.html (the live site)
+python3 build.py          # writes ../index.html (the game)
 python3 build.py local    # writes ../test.html (same game, no install-as-app bits) for local testing
 ```
 
-Needs Python 3 only. To play locally, serve the repo folder (the game fetches `models/` and `video/`):
+Needs Python 3 only. To play locally, serve this folder (the game loads `models/` and `video/` from beside `index.html`):
 `python3 -m http.server 8000` then open http://localhost:8000/?nomovie (`?nomovie` skips the intro movie, `?hq` / `?lite` force the graphics mode).
-Pushing to `main` on GitHub publishes the site through GitHub Pages. After changing files the site caches, bump `CACHE` in `sw.js` (and `VER` in `src/rmodel.js` when models change) so phones fetch the new version.
+
+**Publishing is Tom's call.** Helpers working from a copy of this folder must not push to, connect to, or change the GitHub repository: the repository is the preserved backup of the working game. Hand back the changed files instead. When changing models or files the game caches, bump `CACHE` in `sw.js` and `VER` in `src/rmodel.js` so phones fetch the new version once Tom publishes it.
 
 ### Folder map
 | Path | What it is |
