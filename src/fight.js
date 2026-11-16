@@ -52,17 +52,28 @@ class NullCtrl { read() { this.cur = {}; this.pressed = {}; return this.cur; } }
 /* ---------- melee move table ---------- */
 // reach = [near, far] in front of the body; ys = [low, high] relative to the attacker's feet; frames at 60 fps
 const MELEE = {
-  jab: { clip: ["jab", 4, 12, 26], start: 5, act: 3, rec: 10, dmg: 5, reach: [0.15, 1.08], ys: [1.15, 1.75], hs: 14, bs: 8, push: 2.2, level: "high", sfx: "jab" },
-  kick: { clip: ["kick", 5, 19, 44], start: 8, act: 4, rec: 15, dmg: 7, reach: [0.2, 1.38], ys: [0.75, 1.55], hs: 17, bs: 10, push: 3.2, level: "mid", sfx: "kick" },
-  upper: { clip: ["upper", 0, 9, 34], start: 8, act: 5, rec: 22, dmg: 11, reach: [0.1, 1.0], ys: [0.6, 2.3], hs: 30, bs: 12, push: 1.5, level: "mid", launch: [2.2, 11.5], sfx: "heavy", crouchStart: true },
-  sweep: { clip: ["sweep", 4, 22, 50], start: 9, act: 4, rec: 22, dmg: 8, reach: [0.2, 1.48], ys: [0, 0.45], hs: 30, bs: 10, push: 1, level: "low", trip: true, sfx: "kick", crouchStart: true },
-  jkick: { clip: ["jkick", 8, 17, 17], start: 4, act: 99, rec: 0, dmg: 8, reach: [0, 1.15], ys: [-0.3, 1.0], hs: 16, bs: 10, push: 2.5, level: "overhead", air: true, sfx: "kick" },
-  jpunch: { clip: ["cross", 6, 16, 16], upperOnly: true, start: 3, act: 99, rec: 0, dmg: 7, reach: [0, 1.0], ys: [0.2, 1.4], hs: 15, bs: 9, push: 2, level: "overhead", air: true, sfx: "jab" },
+  jab: { basic: true, hitstop: 3, clip: ["jab", 4, 12, 26], start: 5, act: 3, rec: 10, dmg: 5, reach: [0.15, 1.08], ys: [1.15, 1.75], hs: 14, bs: 8, push: 2.2, level: "high", sfx: "jab" },
+  kick: { basic: true, hitstop: 3, clip: ["kick", 5, 19, 44], start: 8, act: 4, rec: 15, dmg: 7, reach: [0.2, 1.38], ys: [0.75, 1.55], hs: 17, bs: 10, push: 3.2, level: "mid", sfx: "kick" },
+  upper: { basic: true, hitstop: 4, clip: ["upper", 0, 9, 34], start: 8, act: 5, rec: 22, dmg: 11, reach: [0.1, 1.0], ys: [0.6, 2.3], hs: 30, bs: 12, push: 1.5, level: "mid", launch: [2.2, 11.5], sfx: "heavy", crouchStart: true },
+  sweep: { basic: true, hitstop: 4, clip: ["sweep", 4, 22, 50], start: 9, act: 4, rec: 22, dmg: 8, reach: [0.2, 1.48], ys: [0, 0.45], hs: 30, bs: 10, push: 1, level: "low", trip: true, sfx: "kick", crouchStart: true },
+  jkick: { basic: true, hitstop: 3, clip: ["jkick", 8, 17, 17], start: 4, act: 99, rec: 0, dmg: 8, reach: [0, 1.15], ys: [-0.3, 1.0], hs: 16, bs: 10, push: 2.5, level: "overhead", air: true, sfx: "kick" },
+  jpunch: { basic: true, hitstop: 3, clip: ["cross", 6, 16, 16], upperOnly: true, start: 3, act: 99, rec: 0, dmg: 7, reach: [0, 1.0], ys: [0.2, 1.4], hs: 15, bs: 9, push: 2, level: "overhead", air: true, sfx: "jab" },
 };
 
 /* ---------- animation helpers ---------- */
 // map move frame f onto a mocap clip: wind-up a->pk over S frames, ease through the peak for A frames, recover pk->e over R frames
 function strikeF(f, S, A, R, a, pk, e) { if (f < S) return a + (pk - a) * (f / Math.max(1, S)); if (f < S + A) return pk + Math.min(1.5, (f - S) * 0.25); return Math.min(e, pk + 1.5 + (e - pk - 1.5) * Math.min(1, (f - S - A) / Math.max(1, R))); }
+// Basic attacks reach the contact pose on the first active frame, then
+// follow through continuously into recovery.
+function meleeFrame(frame, move) {
+  const [, first, contact, last] = move.clip;
+  if (frame <= move.start) return lerp(first, contact, frame / move.start);
+  const activeEnd = move.start + move.act;
+  const follow = Math.min(last, contact + move.act * 0.3);
+  if (frame <= activeEnd) return lerp(contact, follow, (frame - move.start) / move.act);
+  const recovery = clamp((frame - activeEnd) / move.rec);
+  return lerp(follow, last, recovery * (2 - recovery));
+}
 const AN = (clip, frame, o = {}) => Object.assign({ clip, frame }, o);
 const STANCE_YAW = 0.38; // turn the chest a little toward the camera, Injustice-style
 
@@ -152,13 +163,16 @@ class Fighter {
     this.x = clamp(this.x, -HALF, HALF);
   }
   /* ------------- animation for the current frame ------------- */
-  computeAnim() {
-    const s = this.state, f = this.st, m = this.move, T = this.game.time * 30;
+  computeAnim(blend = 1) {
+    const s = this.state, m = this.move, T = this.game.time * 30;
+    const f = m?.basic && this.previousMove === m && this.previousStateFrame <= this.st
+      ? lerp(this.previousStateFrame, this.st, blend) : this.st;
     if (s === "attack" && m) {
       if (m.anim) return m.anim(this, f);
       const [clip, a, pk, e] = m.clip;
       if (m.air) { const fr = f < m.start ? a + (pk - a) * f / m.start : pk; return m.upperOnly ? AN("jump", 30, { fixY: 0.95, upper: AN(clip, fr), fade: 0.06 }) : AN(clip, fr, { fixY: 0.95, fade: 0.06 }); }
-      return AN(clip, strikeF(f, m.start, m.act, m.rec, a, pk, e), { fade: 0.06 });
+      const frame = m.basic ? meleeFrame(f, m) : strikeF(f, m.start, m.act, m.rec, a, pk, e);
+      return AN(clip, frame, { fade: 0.06 });
     }
     if (s === "walk") { const fwd = this.vx * this.face > 0; return AN(fwd ? "walkF" : "walkB", T * 1.25, { loop: true, fade: 0.12 }); }
     if (s === "crouch") return AN("crouch", T, { loop: true, fade: 0.08 });
@@ -176,16 +190,18 @@ class Fighter {
     if (s === "win") return AN("win", Math.min(50, f * 0.5), { fade: 0.2 });
     if (s === "intro") return AN(this.slot === 0 ? "intro2" : "intro", Math.min(49, f * 0.55), { fade: 0.15 });
     if (s === "cine") return this.cineAnim || AN("idle", T, { loop: true });
-    return AN(this.idleClip || "idle", T + this.slot * 17, { loop: true, fade: 0.14 });
+    return AN(this.idleClip || "idle", T + this.slot * 17, {
+      loop: true, fade: 0.14, ribosomeGuard: this.id === "ribosome" && s === "idle",
+    });
   }
-  render(dt) {
-    const req = this.computeAnim(); if (this.model.anim) this.model.anim.play(req, dt);
+  render(dt, x = this.x, y = this.y, blend = 1) {
+    const req = this.computeAnim(blend); if (this.model.anim) this.model.anim.play(req, dt);
     if (req.fixY != null) this.model.b.Hips.position.y = req.fixY;
-    this.rig.position.set(this.x, this.y, 0);
+    this.rig.position.set(x, y, 0);
     const turn = this.face > 0 ? Math.PI / 2 - STANCE_YAW : -Math.PI / 2 + STANCE_YAW * 1.9;
     const lying = ["down", "ko", "trip", "getup"].includes(this.state);
     this.model.body.rotation.y = lying ? (this.face > 0 ? Math.PI / 2 : -Math.PI / 2) : turn;
-    if (this.model.shadow) { this.model.shadow.position.set(0, -this.y + 0.012, 0); this.model.shadow.scale.setScalar(Math.max(0.35, 1 - this.y * 0.25)); }
+    if (this.model.shadow) { this.model.shadow.position.set(0, -y + 0.012, 0); this.model.shadow.scale.setScalar(Math.max(0.35, 1 - y * 0.25)); }
     if (this.flash > 0) this.flash -= dt;
     if (this.model.mat.userData.flash) this.model.mat.userData.flash.value = Math.max(0, this.flash || 0) * 4;
     const kn = this.buff.knot > 0; this.model.body.scale.setScalar(kn ? 0.55 : 1); if (kn) { this.model.body.rotation.z = Math.sin(this.game.time * 9) * 0.5; this.model.body.position.y = 0.35; } else { this.model.body.rotation.z = 0; this.model.body.position.y = 0; }
@@ -265,6 +281,17 @@ class Game {
   }
   /* ------------- main step (fixed 60 Hz) ------------- */
   step() {
+    this.previousPhase = this.phase;
+    for (const f of this.f) {
+      f.previousX = f.x;
+      f.previousY = f.y;
+      f.previousMove = f.move;
+      f.previousStateFrame = f.st;
+    }
+    for (const p of this.proj) {
+      p.previousX = p.x;
+      p.previousY = p.y;
+    }
     this.time += DT; this.pt += DT;
     this.f.forEach((f) => f.ctrl.read && f.ctrl.read(this, f));
     if (this.phase === "intro") return this.introStep();
@@ -314,16 +341,29 @@ class Game {
     if (this.koPending && this.koPending.hp <= 0) { this.phase = "fight"; this.ko(this.koPending); }
   }
   /* ------------- per-render-frame visuals ------------- */
-  render(dt) {
-    this.f.forEach((f) => f.render(dt)); this.parts.update(dt * (this.hitstop > 0 ? 0.3 : 1));
-    for (const p of this.proj) { p.mesh.position.set(p.x, p.y + (p.dy || 0), p.z ?? 0.25); if (p.spin) p.mesh.rotation.z += p.spin * dt; if (p.render) p.render(p, dt); }
+  render(dt, fraction = 1) {
+    const blend = this.phase === "fight" && this.previousPhase === "fight" && this.hitstop === 0
+      ? fraction : 1;
+    for (const f of this.f) {
+      f.drawX = lerp(f.previousX ?? f.x, f.x, blend);
+      f.drawY = lerp(f.previousY ?? f.y, f.y, blend);
+      f.render(dt, f.drawX, f.drawY, blend);
+    }
+    this.parts.update(dt * (this.hitstop > 0 ? 0.3 : 1));
+    for (const p of this.proj) {
+      const x = lerp(p.previousX ?? p.x, p.x, blend);
+      const y = lerp(p.previousY ?? p.y, p.y, blend);
+      p.mesh.position.set(x, y + (p.dy || 0), p.z ?? 0.25);
+      if (p.spin) p.mesh.rotation.z += p.spin * dt;
+      if (p.render) p.render(p, dt);
+    }
     if (this.stage.update) this.stage.update(this.time, dt, this);
     let cam;
     if (this.phase === "cine" && this.cine) cam = this.cine.cam;
     else {
-      const [a, b] = this.f; const mid = (a.x + b.x) / 2, sep = Math.abs(a.x - b.x);
+      const [a, b] = this.f; const mid = (a.drawX + b.drawX) / 2, sep = Math.abs(a.drawX - b.drawX);
       // keep both fighters fully in frame: pull back for distance and for height (launches), and let the view reach the walls
-      const top = Math.max(a.y, b.y), ay = top * 0.45, HW = 0.443, HH = 0.249; // half-width / half-height of the view per metre of distance (fov 28, 16:9)
+      const top = Math.max(a.drawY, b.drawY), ay = top * 0.45, HW = 0.443, HH = 0.249; // half-width / half-height of the view per metre of distance (fov 28, 16:9)
       const d = clamp(Math.max(5.4 + sep * 0.62, (sep / 2 + 1.25) / HW, (top + 2.15 - 1.04 - ay) / HH), 6.4, 13);
       this.camD = lerp(this.camD, d, 1 - Math.pow(0.0005, dt));
       const lim = Math.max(0, HALF + 1.1 - this.camD * HW);

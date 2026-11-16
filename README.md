@@ -10,6 +10,10 @@ An arcade-style fighting game where the fighters are cell organelles and molecul
 - **Modes:** Single Player (Easy, Medium, Hard) and Training.
 - **Lighter graphics:** Chromebooks get a lighter 3D mode automatically. Add `?lite` or `?hq` to the link to force one or the other.
 
+Megaform artwork is loaded from `images/mega/`. In-game projectiles, hit effects, and sounds are still handled by the move cinematics.
+
+This build uses a matte arena floor and 2048px shadows in HQ. The game renders directly without full-screen bloom or color grading. Fighter meshes and Megaform image assets are the same as in the PNG Megaforms build.
+
 The playable game is `index.html` (one self-contained file built from `src/`), which works offline once loaded.
 
 

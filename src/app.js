@@ -9,19 +9,61 @@ const TOWER_LEN = 6;
 const HUD = {
   show(on) { $id("hud").hidden = !on; },
   setup(game) {
-    game.f.forEach((f, i) => { const pb = $id("pb" + i); pb.style.setProperty("--c", f.info.hex); $id("mt" + i).style.setProperty("--c", f.info.hex); $id("combo" + i).style.setProperty("--c", f.info.hex); $id("toast" + i).style.setProperty("--c", f.info.hex);
-      $id("nm" + i).textContent = f.info.name.toUpperCase(); $id("port" + i).style.backgroundImage = `url(${PORTRAITS[f.id]})`; });
+    this.fighters = game.f.map((f, i) => {
+      const hp = $id("hp" + i);
+      const meter = $id("mt" + i);
+      for (const el of [$id("pb" + i), meter, $id("combo" + i), $id("toast" + i)]) {
+        el.style.setProperty("--c", f.info.hex);
+      }
+      $id("nm" + i).textContent = f.info.name.toUpperCase();
+      $id("port" + i).style.backgroundImage = `url(${PORTRAITS[f.id]})`;
+      return {
+        hp,
+        fill: hp.querySelector(".fill"),
+        ghost: hp.querySelector(".gh"),
+        pips: $id("pips" + i).children,
+        meter,
+        meterFill: meter.querySelector(".mbar i"),
+        meterLabel: meter.querySelector(".lbl"),
+      };
+    });
+    this.timer = $id("timer");
+    this.lastSecond = null;
   },
   update(game) {
     game.f.forEach((f, i) => {
-      f.dispHp = f.hp; f.ghostHp = Math.max(f.hp, f.ghostHp - 0.5);
-      const hp = $id("hp" + i); hp.classList.toggle("lastbar", f.bars === 1);
-      hp.querySelector(".fill").style.width = (f.hp / BAR_HP) * 100 + "%"; hp.querySelector(".gh").style.width = (f.ghostHp / BAR_HP) * 100 + "%";
-      $id("pips" + i).innerHTML = [0, 1].map((k) => `<b class="${k < f.bars ? "" : "off"}"></b>`).join("");
-      const mt = $id("mt" + i); mt.querySelector("i").style.width = f.meter + "%"; mt.classList.toggle("full", f.meter >= 100);
-      mt.querySelector(".lbl").textContent = f.meter >= 100 ? `MEGAFORM READY · ${i === 0 ? "T" : "P"}` : "MEGAFORM";
+      const view = this.fighters[i];
+      f.dispHp = f.hp;
+      f.ghostHp = Math.max(f.hp, f.ghostHp - 0.5);
+      if (view.lastHp !== f.hp) {
+        view.fill.style.width = `${f.hp / BAR_HP * 100}%`;
+        view.lastHp = f.hp;
+      }
+      if (view.lastGhost !== f.ghostHp) {
+        view.ghost.style.width = `${f.ghostHp / BAR_HP * 100}%`;
+        view.lastGhost = f.ghostHp;
+      }
+      if (view.lastBars !== f.bars) {
+        view.hp.classList.toggle("lastbar", f.bars === 1);
+        for (let k = 0; k < view.pips.length; k++) view.pips[k].classList.toggle("off", k >= f.bars);
+        view.lastBars = f.bars;
+      }
+      if (view.lastMeter !== f.meter) {
+        view.meterFill.style.width = `${f.meter}%`;
+        view.lastMeter = f.meter;
+      }
+      const full = f.meter >= 100;
+      if (view.full !== full) {
+        view.meter.classList.toggle("full", full);
+        view.meterLabel.textContent = full ? `MEGAFORM READY · ${i === 0 ? "T" : "P"}` : "MEGAFORM";
+        view.full = full;
+      }
     });
-    $id("timer").textContent = Math.ceil(game.timer);
+    const second = Math.ceil(game.timer);
+    if (second !== this.lastSecond) {
+      this.timer.textContent = second;
+      this.lastSecond = second;
+    }
   },
   barBreak(slot) { const hp = $id("hp" + slot); hp.animate([{ filter: "brightness(4)" }, { filter: "none" }], 500); this.toast(slot, "HEALTH BAR BROKEN!"); },
   combo(slot, n) { const el = $id("combo" + slot); el.innerHTML = `${n} HITS<small>COMBO</small>`; el.classList.remove("on"); void el.offsetWidth; el.classList.add("on"); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove("on"), 1100); },
@@ -34,8 +76,10 @@ const HUD = {
   science(f, moveName) {
     const m = MOVES[f.id]; if (!m) return; let bio = null, name = moveName;
     const sp = m.specials.find((s) => s.name === moveName); if (sp) bio = sp.bio; else if (m.ult && moveName === m.ult.name) bio = m.ult.bio;
-    if (!bio) return; $id("sciN").textContent = name; $id("sciN").style.color = f.info.hex; $id("sciP").textContent = bio;
-    const s = $id("sci"); s.style.borderColor = f.info.hex; s.classList.remove("flash"); void s.offsetWidth; s.classList.add("flash");
+    if (!bio) return; $id("sciN").textContent = name; $id("sciN").style.color = f.info.hex; $id("sciP").textContent = f.id === "phage" && moveName === m.ult?.name
+      ? bio + " The sprite shows a different virus."
+      : bio;
+    const s = $id("sci"); s.classList.remove("flash"); void s.offsetWidth; s.classList.add("flash");
     document.querySelectorAll(`.sp[data-mv]`).forEach((e) => e.classList.toggle("used", e.dataset.mv === f.slot + ":" + moveName));
   },
 };
@@ -177,7 +221,7 @@ const APP = {
     if (boss) this.game.f[1].rig.scale.setScalar(1.1);
     if (tr) { this.game.training = true; this.game.timer = 99; }
     HUD.setup(this.game); HUD.show(true); $id("announce").innerHTML = "";
-    sideCards([{ id: this.picks[0], slot: 0 }, { id: this.picks[1], slot: 1, cpu: true }]);
+    sideCards([{ id: this.picks[0], slot: 0 }]);
     $id("sideMode").textContent = tr ? "TRAINING" : `TOWER ${floor + 1}/${this.tower.list.length} · ${D.name}`; this.acc = 0; this.setMusic("fight");
   },
   endGame() { if (this.game) { this.game.dispose(); this.game = null; } $id("announce").innerHTML = ""; $id("pops").innerHTML = ""; this.view && (this.view.impact = 0); },
@@ -226,11 +270,11 @@ const APP = {
       const g = this.game; this.acc += dt * g.slow; let n = 0; while (this.acc >= DT && n < 5) { g.step(); this.acc -= DT; n++; }
       if (TOUCH) { const mb = document.querySelector(".ab.mega"); const rd = g.f[0].meter >= 100; if (mb._r !== rd) { mb._r = rd; mb.classList.toggle("ready", rd); } }
       if (g.training) { g.timer = 99; g.f[0].meter = 100; g.f.forEach((f) => { if (f.slot === 1 && f.bars === 1 && f.hp < 30 && ["idle", "down", "getup"].includes(f.state)) { f.bars = 2; f.hp = BAR_HP; } }); }
-      g.render(dt); HUD.update(g); this.view.render(dt);
+      g.render(dt, Math.min(1, this.acc / DT)); HUD.update(g); this.view.render(dt);
       if (g.phase === "over") this.showResults();
       return;
     }
-    if (this.mode === "paused" || this.mode === "results") { if (this.game) { this.game.render(0); this.view.render(dt); } return; }
+    if (this.mode === "paused" || this.mode === "results") { if (this.game) { this.game.render(0, Math.min(1, this.acc / DT)); this.view.render(dt); } return; }
     if (["intro", "press", "title", "settings"].includes(this.mode)) { INTRO.update(dt); if (this.mode === "intro" && INTRO.phase === "logo") this.toPress(); } else SHOW.update(dt, "select");
     this.view.render(dt);
   },

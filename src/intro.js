@@ -17,7 +17,15 @@ const INTRO = {
     this.line = this.ids.map((id, i) => { const x = (i - 6.5) * 1.2; return V3(x, 0, -Math.abs(x) * 0.05); });
     this.st = this.ids.map(() => ({ f: 0 }));
   },
-  mega(id) { if (!this.megas[id]) { const m = id === "atp" ? atpSynthaseModel() : id === "ribosome" ? bigRibosome() : MEGA[id].build(); m.traverse((o) => { o.castShadow = false; }); if (MEGA[id] && MEGA[id].assemble) MEGA[id].anim(m, 99); m.visible = false; this.root.add(m); this.megas[id] = m; } return this.megas[id]; },
+  mega(id) {
+    if (!this.megas[id]) {
+      const model = megaSprite(id, id === "ribosome" ? 5.4 : 4.8);
+      model.visible = false;
+      this.root.add(model);
+      this.megas[id] = model;
+    }
+    return this.megas[id];
+  },
   show(on) { this.root.visible = on; document.body.classList.toggle("cine", on && this.phase === "play"); if (!on) { this.cap.textContent = ""; this.nameEl.innerHTML = ""; this.fade.style.opacity = 0; $id("skipHint").hidden = true; return; }
     const v = this.view; v.scene.background = new THREE.Color("#05060a"); v.scene.fog = null; v.hemi.color.set("#ffffff"); v.hemi.groundColor.set("#30303a"); v.hemi.intensity = 0.4; v.key.color.set("#ffffff"); v.key.intensity = 1.5; v.rimA.color.set("#7fd8ff"); v.rimA.intensity = 1.5; v.rimB.color.set("#ff7fc8"); v.rimB.intensity = 1.2; v.fill.intensity = 0.3; },
   start() { this.t = 0; this.phase = "play"; this.shot = -2; this.boomed = false; this.st.forEach((s) => { s.f = 0; s.on = false; }); $id("skipHint").hidden = false; document.body.classList.add("cine"); },

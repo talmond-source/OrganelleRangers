@@ -53,9 +53,14 @@ const R3D = (() => {
         this.cur = key; this.fadeT = req.fade ?? 0.1; this.fade = this.fadeT > 0 ? 1 : 0;
       }
       sample(req.clip, req.frame, this.Q, this.P, req);
-      if (req.upper) { sample(req.upper.clip, req.upper.frame, this.Qb, this.Pb, req.upper); CL.bones.forEach((n, j) => { if (UPPER.has(n)) this.Q[j].copy(this.Qb[j]); }); }
+      if (req.upper) { sample(req.upper.clip, req.upper.frame, this.Qb, this.Pb, req.upper); CL.bones.forEach((n, j) => { if (!UPPER.has(n)) return;
+        if (!req.ribosomeGuard) this.Q[j].copy(this.Qb[j]);
+        else if (/^(Left|Right)(Arm|ForeArm|Hand)$/.test(n)) this.Q[j].slerp(this.Qb[j], 0.38); }); }
       const RT = this.m.retarget; // sculpted models: map the mocap skeleton's rotations onto this skeleton
       if (RT) { for (let j = 0; j < NB; j++) this.Q[j].premultiply(RT.Dp[j]).multiply(RT.D[j]); this.P.add(RT.hipOff); }
+      if (req.ribosomeGuard && this.m.guardCorrection) {
+        for (const { index, rest, amount } of this.m.guardCorrection) this.Q[index].slerp(rest, amount);
+      }
       if (this.fade > 0) { this.fade = Math.max(0, this.fade - dt / Math.max(1e-3, this.fadeT)); const w = this.fade * this.fade * (3 - 2 * this.fade); this.Q.forEach((q, j) => q.slerp(this.from[j], w)); this.P.lerp(this.fromP, w); }
       this.map.forEach((b, j) => b && b.quaternion.copy(this.Q[j]));
       this.m.b.Hips.position.copy(this.P);

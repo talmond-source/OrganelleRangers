@@ -4,7 +4,7 @@
    existing mocap clips drive it:  L_target = inv(D_parent) * L_source * D_self.
    Rangers without a sculpted model fall back to the projected-sheet body. */
 const RMODEL = (() => {
-  const VER = 3; // bump when a model file changes so cached copies refresh
+  const VER = 10; // bump when a model file changes so cached copies refresh
   const LIST = ["atp", "ribosome", "rougher", "golgi", "cytoplasm", "membrane", "mito", "nucleus", "smoother", "lysosome", "dna", "rna", "mitosis", "crispr", "phage"]; // rangers that have a sculpted model on disk
   async function fetchModel(id) {
     const r = await fetch("models/" + id + ".rmdl?v=" + VER); if (!r.ok) throw new Error(id + " " + r.status);
@@ -68,7 +68,13 @@ const RMODEL = (() => {
     const D = clipBones.map((nm, j) => new THREE.Quaternion().fromArray(H.D, H.clipBones.indexOf(nm) * 4));
     const Dp = clipBones.map((nm) => { const bn = b[nm]; const p = bn && bn.parent && bn.parent.isBone ? clipBones.indexOf(bn.parent.name) : -1; return p >= 0 ? D[p].clone().invert() : new THREE.Quaternion(); });
     const hipOff = new THREE.Vector3().fromArray(H.hipOff);
-    return { root, body, b, suit, helmet: null, mat, skeleton: suit.skeleton, extras: {}, L: null, sculpted: true, retarget: { D, Dp, hipOff } };
+    // Keep the chest, collar and helmet upright in Ribosome's neutral guard.
+    const guardCorrection = id === "ribosome"
+      ? Object.entries({ Spine: .87, Spine1: .84, Spine2: .67, Neck: .75, Head: .85, LeftArm: .22, RightArm: .22 })
+        .map(([name, amount]) => ({ index: clipBones.indexOf(name), rest: b[name].quaternion.clone(), amount }))
+        .filter(({ index }) => index >= 0)
+      : null;
+    return { guardCorrection, root, body, b, suit, helmet: null, mat, skeleton: suit.skeleton, extras: {}, L: null, sculpted: true, retarget: { D, Dp, hipOff } };
   }
   return { LIST, loadAll, build };
 })();
